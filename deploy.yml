@@ -1,0 +1,73 @@
+---
+- name: Build, push Docker image and run container
+  hosts: servers
+  gather_facts: no
+  become: yes
+  vars:
+    ansible_become_pass: "{{ sudoPass }}"
+    app_dir: "{{ app_dir }}"
+    container_name: "{{ container_name }}"
+    host_port: "{{ host_port }}"
+    container_port: "{{ container_port }}"
+
+  tasks:
+    - name: Ensure Docker is installed
+      apt:
+        name: docker.io
+        state: present
+      become: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Transfer Dockerfile to remote server
+      copy:
+        src: Dockerfile
+        dest: "{{ app_dir }}/Dockerfile"
+        mode: '0644'
+
+    - name: Transfer index.html to remote server
+      copy:
+        src: index.html
+        dest: "{{ app_dir }}/index.html"
+        mode: '0644'
+
+    - name: Login to Docker registry
+      community.docker.docker_login:
+        registry_url: "{{ registry_url }}"
+        username: "{{ docker_user }}"
+        password: "{{ docker_pass }}"
+
+    - name: Build Docker image
+      community.docker.docker_image:
+        source: build
+        build:
+          path: "{{ app_dir }}"
+        name: "{{ registry_url }}/{{ image_name }}"
+        push: yes
+        state: present
+
+    - name: Ensure container is stopped and removed if it exists
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        state: absent
+      ignore_errors: yes
+
+    - name: Run Docker container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ registry_url }}/{{ image_name }}"
+        state: started
+        restart_policy: always
+        ports:
+          - "{{ host_port }}:{{ container_port }}"
+
+    - name: Check if container is running
+      community.docker.docker_container_info:
+        name: "{{ container_name }}"
+      register: container_info
